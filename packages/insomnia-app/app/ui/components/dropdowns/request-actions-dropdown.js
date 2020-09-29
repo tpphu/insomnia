@@ -1,5 +1,5 @@
-import React, { PureComponent } from 'react';
-import PropTypes from 'prop-types';
+// @flow
+import React from 'react';
 import autobind from 'autobind-decorator';
 import PromptButton from '../base/prompt-button';
 import {
@@ -13,8 +13,46 @@ import * as models from '../../../models';
 import { hotKeyRefs } from '../../../common/hotkeys';
 import * as misc from '../../../common/misc';
 
+// Plugin action related imports
+import type { RequestAction, RequestGroupAction } from '../../../plugins';
+import type { HotKeyRegistry } from '../../../common/hotkeys';
+import type { Request } from '../../../models/request';
+import type { RequestGroup } from '../../../models/request-group';
+import type { Environment } from '../../../models/environment';
+import { getRequestActions } from '../../../plugins';
+import * as pluginContexts from '../../../plugins/context/index';
+import { showError } from '../modals';
+import { RENDER_PURPOSE_NO_RENDER } from '../../../common/render';
+import classnames from 'classnames';
+
+type Props = {
+  handleDuplicateRequest: Function,
+  handleGenerateCode: Function,
+  handleCopyAsCurl: Function,
+  handleShowSettings: Function,
+  isPinned: Boolean,
+  request: Request,
+  requestGroup: RequestGroup,
+  hotKeyRegistry: HotKeyRegistry,
+  handleSetRequestPinned: Function,
+  activeEnvironment: Environment | null,
+};
+
+// Setup state for plugin actions
+type State = {
+  actionPlugins: Array<RequestGroupAction>,
+  loadingActions: { [string]: boolean },
+};
+
 @autobind
-class RequestActionsDropdown extends PureComponent {
+class RequestActionsDropdown extends React.PureComponent<Props, State> {
+  _dropdown: ?Dropdown;
+
+  state = {
+    actionPlugins: [],
+    loadingActions: {},
+  };
+
   _setDropdownRef(n) {
     this._dropdown = n;
   }
@@ -45,8 +83,39 @@ class RequestActionsDropdown extends PureComponent {
     models.request.remove(request);
   }
 
-  show() {
-    this._dropdown.show();
+  async onOpen() {
+    const plugins = await getRequestActions();
+    this.setState({ actionPlugins: plugins });
+  }
+
+  async show() {
+    this._dropdown && this._dropdown.show();
+  }
+
+  async _handlePluginClick(p: RequestAction) {
+    this.setState(state => ({ loadingActions: { ...state.loadingActions, [p.label]: true } }));
+
+    try {
+      const { activeEnvironment, request, requestGroup } = this.props;
+      const activeEnvironmentId = activeEnvironment ? activeEnvironment._id : null;
+
+      const context = {
+        ...(pluginContexts.app.init(RENDER_PURPOSE_NO_RENDER): Object),
+        ...(pluginContexts.data.init(): Object),
+        ...(pluginContexts.store.init(p.plugin): Object),
+        ...(pluginContexts.network.init(activeEnvironmentId): Object),
+      };
+
+      await p.action(context, { request, requestGroup });
+    } catch (err) {
+      showError({
+        title: 'Plugin Action Failed',
+        error: err,
+      });
+    }
+
+    this.setState(state => ({ loadingActions: { ...state.loadingActions, [p.label]: false } }));
+    this._dropdown && this._dropdown.hide();
   }
 
   render() {
@@ -57,8 +126,10 @@ class RequestActionsDropdown extends PureComponent {
       ...other
     } = this.props;
 
+    const { actionPlugins, loadingActions } = this.state;
+
     return (
-      <Dropdown ref={this._setDropdownRef} {...other}>
+      <Dropdown ref={this._setDropdownRef} onOpen={this.onOpen} {...other}>
         <DropdownButton>
           <i className="fa fa-caret-down" />
         </DropdownButton>
@@ -95,20 +166,21 @@ class RequestActionsDropdown extends PureComponent {
           <i className="fa fa-wrench" /> Settings
           <DropdownHint keyBindings={hotKeyRegistry[hotKeyRefs.REQUEST_SHOW_SETTINGS.id]} />
         </DropdownItem>
+
+        {actionPlugins.length > 0 && <DropdownDivider>Plugins</DropdownDivider>}
+        {actionPlugins.map((p: RequestAction) => (
+          <DropdownItem key={p.label} onClick={() => this._handlePluginClick(p)} stayOpenAfterClick>
+            {loadingActions[p.label] ? (
+              <i className="fa fa-refresh fa-spin" />
+            ) : (
+              <i className={classnames('fa', p.icon || 'fa-code')} />
+            )}
+            {p.label}
+          </DropdownItem>
+        ))}
       </Dropdown>
     );
   }
 }
-
-RequestActionsDropdown.propTypes = {
-  handleDuplicateRequest: PropTypes.func.isRequired,
-  handleGenerateCode: PropTypes.func.isRequired,
-  handleCopyAsCurl: PropTypes.func.isRequired,
-  handleShowSettings: PropTypes.func.isRequired,
-  isPinned: PropTypes.bool.isRequired,
-  request: PropTypes.object.isRequired,
-  hotKeyRegistry: PropTypes.object.isRequired,
-  handleSetRequestPinned: PropTypes.func.isRequired,
-};
 
 export default RequestActionsDropdown;

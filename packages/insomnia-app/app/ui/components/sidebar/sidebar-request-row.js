@@ -151,6 +151,7 @@ class SidebarRequestRow extends PureComponent {
       isPinned,
       disableDragAndDrop,
       hotKeyRegistry,
+      activeEnvironment,
     } = this.props;
 
     const { dragDirection } = this.state;
@@ -220,6 +221,8 @@ class SidebarRequestRow extends PureComponent {
                 isPinned={isPinned}
                 requestGroup={requestGroup}
                 hotKeyRegistry={hotKeyRegistry}
+                // Necessary for plugin actions to have network capabilities
+                activeEnvironment={activeEnvironment}
               />
             </div>
             {isPinned && (
